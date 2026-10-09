@@ -13,7 +13,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const TURNSTILE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
-const defaults = [
+const defaultClues = [
   "Someone made this little adventure just for you. 💝",
   "You make ordinary moments feel extraordinary. 💕",
   "There are so many reasons you deserve to smile. 💌",
@@ -29,10 +29,22 @@ const stages = [
 
 const occasions = {
   birthday: "Birthday",
-  romantic: "Romantic",
+  romantic: "Romantic / Love",
+  love: "Love",
   anniversary: "Anniversary",
   friendship: "Friendship",
+  congratulations: "Congratulations",
   other: "Special Surprise",
+};
+
+const melodies = {
+  birthday: [523.25, 659.25, 783.99, 659.25, 587.33, 698.46, 880, 698.46],
+  romantic: [261.63, 329.63, 392, 493.88, 440, 392, 329.63, 293.66],
+  love: [261.63, 329.63, 392, 493.88, 440, 392, 329.63, 293.66],
+  anniversary: [293.66, 369.99, 440, 554.37, 493.88, 440, 369.99, 329.63],
+  friendship: [392, 493.88, 587.33, 493.88, 440, 523.25, 659.25, 523.25],
+  congratulations: [392, 493.88, 587.33, 783.99, 698.46, 587.33, 659.25, 783.99],
+  other: [349.23, 440, 523.25, 659.25, 587.33, 523.25, 440, 392],
 };
 
 const heartPositions = [
@@ -43,13 +55,13 @@ const heartPositions = [
   { left: "13%", top: "75%" },
 ];
 
-async function callFunction(functionName, body, isForm = false) {
+async function callFunction(name, body, isForm = false) {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
-    throw new Error("Supabase configuration is missing from .env.local");
+    throw new Error("Supabase configuration is missing.");
   }
 
   const response = await fetch(
-    `${SUPABASE_URL}/functions/v1/${functionName}`,
+    `${SUPABASE_URL}/functions/v1/${name}`,
     {
       method: "POST",
       headers: {
@@ -75,46 +87,140 @@ export default function App() {
 
   const [loading, setLoading] = useState(recipientMode);
   const [loadError, setLoadError] = useState("");
-
   const [name, setName] = useState("Someone Special");
   const [occasion, setOccasion] = useState("birthday");
   const [message, setMessage] = useState(
     "Wishing you a day full of love, laughter, and beautiful memories!"
   );
-  const [clues, setClues] = useState(defaults);
+  const [clues, setClues] = useState(defaultClues);
   const [photo, setPhoto] = useState("");
   const [photoFile, setPhotoFile] = useState(null);
-
   const [step, setStep] = useState(0);
   const [giftTaps, setGiftTaps] = useState(0);
   const [caught, setCaught] = useState([]);
   const [letterOpen, setLetterOpen] = useState(false);
   const [puzzle, setPuzzle] = useState([]);
   const [countdown, setCountdown] = useState(null);
-
   const [category, setCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [musicEnabled, setMusicEnabled] = useState(false);
   const [captchaToken, setCaptchaToken] = useState("");
   const [captchaVersion, setCaptchaVersion] = useState(0);
-
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [shareLink, setShareLink] = useState("");
   const [copySuccess, setCopySuccess] = useState(false);
 
-  const audioRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const musicTimerRef = useRef(null);
+  const musicNodesRef = useRef([]);
+  const musicIndexRef = useRef(0);
   const photoUrlRef = useRef(null);
 
-  useEffect(() => {
-    const audio = new Audio("/music.mp3");
-    audio.loop = true;
-    audio.volume = 0.35;
-    audioRef.current = audio;
+  function stopInstrumental() {
+    if (musicTimerRef.current) {
+      clearInterval(musicTimerRef.current);
+      musicTimerRef.current = null;
+    }
 
+    musicNodesRef.current.forEach((node) => {
+      try {
+        node.stop();
+      } catch {}
+      try {
+        node.disconnect();
+      } catch {}
+    });
+
+    musicNodesRef.current = [];
+  }
+
+  function playNote(frequency, duration = 0.8) {
+    const context = audioContextRef.current;
+    if (!context || context.state !== "running") return;
+
+    const now = context.currentTime;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency, now);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.04, now + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + duration + 0.02);
+
+    musicNodesRef.current.push(oscillator, gain);
+  }
+
+  async function startMusic() {
+    try {
+      const AudioContextClass =
+        window.AudioContext || window.webkitAudioContext;
+
+      if (!AudioContextClass) return;
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContextClass();
+      }
+
+      const context = audioContextRef.current;
+      if (context.state === "suspended") await context.resume();
+
+      if (musicTimerRef.current) return;
+
+      setMusicEnabled(true);
+
+      const pattern = melodies[occasion] || melodies.other;
+
+      const tick = () => {
+        const index = musicIndexRef.current % pattern.length;
+        playNote(pattern[index]);
+
+        if (index % 2 === 0) {
+          playNote(pattern[index] / 2, 0.9);
+        }
+
+        musicIndexRef.current += 1;
+      };
+
+      tick();
+      musicTimerRef.current = setInterval(tick, 650);
+    } catch (error) {
+      console.error("Could not start music:", error);
+      setMusicEnabled(false);
+    }
+  }
+
+  function toggleMusic() {
+    if (musicTimerRef.current) {
+      stopInstrumental();
+      setMusicEnabled(false);
+    } else {
+      startMusic();
+    }
+  }
+
+  useEffect(() => {
+    stopInstrumental();
+    musicIndexRef.current = 0;
+    setMusicEnabled(false);
+  }, [occasion]);
+
+  useEffect(() => {
     return () => {
-      audio.pause();
-      if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
+      stopInstrumental();
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+      }
+      if (photoUrlRef.current) {
+        URL.revokeObjectURL(photoUrlRef.current);
+      }
     };
   }, []);
 
@@ -123,9 +229,12 @@ export default function App() {
 
     let cancelled = false;
 
-    async function load() {
+    async function loadSurprise() {
       try {
-        const data = await callFunction("get-surprise", { id: surpriseId });
+        const data = await callFunction("get-surprise", {
+          id: surpriseId,
+        });
+
         if (cancelled) return;
 
         setName(data.recipient_name);
@@ -133,10 +242,7 @@ export default function App() {
         setMessage(data.message);
         setPhoto(data.photo_url || "");
 
-        if (
-          Array.isArray(data.clues) &&
-          data.clues.length === 4
-        ) {
+        if (Array.isArray(data.clues) && data.clues.length === 4) {
           setClues(data.clues);
         }
       } catch (error) {
@@ -146,8 +252,10 @@ export default function App() {
       }
     }
 
-    load();
-    return () => { cancelled = true; };
+    loadSurprise();
+    return () => {
+      cancelled = true;
+    };
   }, [recipientMode, surpriseId]);
 
   useEffect(() => {
@@ -171,6 +279,7 @@ export default function App() {
     return loveMessages.filter((item) => {
       const categoryMatch =
         category === "all" || item.category === category;
+
       const searchMatch =
         !query ||
         item.text?.toLowerCase().includes(query) ||
@@ -193,6 +302,7 @@ export default function App() {
     setClues((previous) =>
       previous.map((clue, i) => (i === index ? value : clue))
     );
+    setShareLink("");
   }
 
   function uploadPhoto(event) {
@@ -201,15 +311,17 @@ export default function App() {
 
     if (
       !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
-      file.size > 5 * 1024 * 1024 ||
-      file.size === 0
+      file.size === 0 ||
+      file.size > 5 * 1024 * 1024
     ) {
-      alert("Please choose a JPEG, PNG or WebP photo under 5 MB.");
+      alert("Choose a JPEG, PNG or WebP photo under 5 MB.");
       event.target.value = "";
       return;
     }
 
-    if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
+    if (photoUrlRef.current) {
+      URL.revokeObjectURL(photoUrlRef.current);
+    }
 
     const url = URL.createObjectURL(file);
     photoUrlRef.current = url;
@@ -218,45 +330,28 @@ export default function App() {
     setShareLink("");
   }
 
-  async function toggleMusic() {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (musicEnabled) {
-      audio.pause();
-      setMusicEnabled(false);
-    } else {
-      try {
-        await audio.play();
-        setMusicEnabled(true);
-      } catch {
-        alert("Add a valid music.mp3 file to your public folder.");
-      }
-    }
-  }
-
   async function createSurprise() {
     setCreateError("");
     setShareLink("");
     setCopySuccess(false);
 
     if (!name.trim() || name.trim().length > 80) {
-      setCreateError("Please enter a valid recipient name.");
+      setCreateError("Recipient name must be 1–80 characters.");
       return;
     }
 
     if (!message.trim() || message.trim().length > 2000) {
-      setCreateError("Please enter a message of 1–2000 characters.");
+      setCreateError("Message must be 1–2000 characters.");
       return;
     }
 
     if (clues.some((clue) => !clue.trim() || clue.length > 400)) {
-      setCreateError("All four clues must be 1–400 characters.");
+      setCreateError("Please complete all four clues (max 400 characters each).");
       return;
     }
 
     if (!captchaToken) {
-      setCreateError("Complete the security verification first.");
+      setCreateError("Please complete security verification.");
       return;
     }
 
@@ -275,14 +370,15 @@ export default function App() {
 
       const result = await callFunction("create-surprise", form, true);
 
-      const link = `${window.location.origin}${window.location.pathname}?s=${encodeURIComponent(result.id)}`;
-      setShareLink(link);
+      setShareLink(
+        `${window.location.origin}${window.location.pathname}?s=${encodeURIComponent(result.id)}`
+      );
     } catch (error) {
       setCreateError(error.message);
     } finally {
       setCreating(false);
       setCaptchaToken("");
-      setCaptchaVersion((version) => version + 1);
+      setCaptchaVersion((value) => value + 1);
     }
   }
 
@@ -291,7 +387,7 @@ export default function App() {
       await navigator.clipboard.writeText(shareLink);
       setCopySuccess(true);
     } catch {
-      setCreateError("Unable to copy automatically. Select the link and copy it.");
+      setCreateError("Unable to copy automatically. Select and copy the link.");
     }
   }
 
@@ -305,9 +401,7 @@ export default function App() {
           text: "Someone made something special just for you!",
           url: shareLink,
         });
-      } catch {
-        // User may have cancelled the share sheet.
-      }
+      } catch {}
     } else {
       await copyLink();
     }
@@ -318,9 +412,11 @@ export default function App() {
       ? `Happy Birthday, ${name}! 🎂`
       : occasion === "anniversary"
       ? `Happy Anniversary, ${name}! 💍`
+      : occasion === "congratulations"
+      ? `Congratulations, ${name}! 🎉`
       : occasion === "friendship"
       ? `You're Amazing, ${name}! 💛`
-      : occasion === "romantic"
+      : occasion === "romantic" || occasion === "love"
       ? `For You, ${name}! ❤️`
       : `Surprise, ${name}! ✨`;
 
@@ -330,7 +426,7 @@ export default function App() {
   return (
     <main className="wish-page">
       <div className="floating-decorations" aria-hidden="true">
-        {["💗", "🌸", "✨", "💕", "🦋", "⭐", "💖", "🌷", "💫", "💗", "🌸", "✨"].map(
+        {["💗", "🌸", "✨", "💕", "🦋", "⭐", "💖", "🌷"].map(
           (emoji, index) => (
             <span
               key={index}
@@ -348,7 +444,6 @@ export default function App() {
 
       <header className="wish-header">
         <div className="wish-brand">✦ WishBloom</div>
-
         <button className="wish-music" onClick={toggleMusic}>
           {musicEnabled ? <Music2 size={18} /> : <VolumeX size={18} />}
           {musicEnabled ? "Music On" : "Music Off"}
@@ -356,12 +451,12 @@ export default function App() {
       </header>
 
       {loading ? (
-        <section className="wish-card" style={{ maxWidth: 650, margin: "auto" }}>
+        <section className="wish-card">
           <h1>Opening your surprise... 💝</h1>
           <p>Gathering a little magic for you.</p>
         </section>
       ) : loadError ? (
-        <section className="wish-card" style={{ maxWidth: 650, margin: "auto" }}>
+        <section className="wish-card">
           <h1>Couldn't open this surprise 💌</h1>
           <p>{loadError}</p>
           <a href="/" className="wish-primary">Visit WishBloom</a>
@@ -369,7 +464,11 @@ export default function App() {
       ) : (
         <div
           className="wish-layout"
-          style={recipientMode ? { gridTemplateColumns: "minmax(0, 750px)", justifyContent: "center" } : {}}
+          style={
+            recipientMode
+              ? { gridTemplateColumns: "minmax(0, 750px)", justifyContent: "center" }
+              : {}
+          }
         >
           <AnimatePresence mode="wait">
             {step < 4 ? (
@@ -394,10 +493,7 @@ export default function App() {
 
                 <div className="wish-dots">
                   {[0, 1, 2, 3].map((index) => (
-                    <span
-                      key={index}
-                      className={index <= step ? "active" : ""}
-                    />
+                    <span key={index} className={index <= step ? "active" : ""} />
                   ))}
                 </div>
 
@@ -406,21 +502,18 @@ export default function App() {
                 {step === 0 && (
                   <div className="wish-stage">
                     <p>Someone left a magical gift for you. Tap it three times!</p>
-
                     <motion.button
                       className="wish-big-emoji"
                       whileTap={{ scale: 0.85, rotate: 10 }}
-                      onClick={() => setGiftTaps((n) => Math.min(n + 1, 3))}
+                      onClick={() => {
+                        startMusic();
+                        setGiftTaps((value) => Math.min(value + 1, 3));
+                      }}
                     >
                       {giftTaps === 3 ? "💝" : "🎁"}
                     </motion.button>
-
                     <div className="wish-counter">{giftTaps} / 3 taps</div>
-
-                    {giftTaps === 3 && (
-                      <div className="wish-clue">{clues[0]}</div>
-                    )}
-
+                    {giftTaps === 3 && <div className="wish-clue">{clues[0]}</div>}
                     <button
                       className="wish-primary"
                       disabled={giftTaps < 3}
@@ -434,7 +527,6 @@ export default function App() {
                 {step === 1 && (
                   <div className="wish-stage">
                     <p>Catch any three floating hearts to reveal your next clue!</p>
-
                     <div className="wish-heart-field">
                       {heartPositions.map((position, index) => (
                         <motion.button
@@ -462,15 +554,8 @@ export default function App() {
                         </motion.button>
                       ))}
                     </div>
-
-                    <div className="wish-counter">
-                      💕 {Math.min(caught.length, 3)} / 3 hearts
-                    </div>
-
-                    {caught.length >= 3 && (
-                      <div className="wish-clue">{clues[1]}</div>
-                    )}
-
+                    <div className="wish-counter">💕 {Math.min(caught.length, 3)} / 3 hearts</div>
+                    {caught.length >= 3 && <div className="wish-clue">{clues[1]}</div>}
                     <button
                       className="wish-primary"
                       disabled={caught.length < 3}
@@ -484,7 +569,6 @@ export default function App() {
                 {step === 2 && (
                   <div className="wish-stage">
                     <p>A secret letter is waiting for you. Tap to open it!</p>
-
                     <motion.button
                       className="wish-big-emoji"
                       whileTap={{ scale: 0.9 }}
@@ -492,7 +576,6 @@ export default function App() {
                     >
                       {letterOpen ? "💌" : "✉️"}
                     </motion.button>
-
                     {letterOpen ? (
                       <motion.div
                         className="wish-letter"
@@ -506,7 +589,6 @@ export default function App() {
                     ) : (
                       <div className="wish-counter">Tap the envelope 💌</div>
                     )}
-
                     <button
                       className="wish-primary"
                       disabled={!letterOpen}
@@ -520,11 +602,7 @@ export default function App() {
                 {step === 3 && (
                   <div className="wish-stage">
                     <p>Collect all three heart pieces to unlock your surprise!</p>
-
-                    <div className="wish-lock">
-                      {puzzle.length === 3 ? "💖" : "🔒"}
-                    </div>
-
+                    <div className="wish-lock">{puzzle.length === 3 ? "💖" : "🔒"}</div>
                     <div className="wish-puzzle">
                       {["💗", "💓", "💕"].map((emoji, index) => (
                         <motion.button
@@ -542,15 +620,8 @@ export default function App() {
                         </motion.button>
                       ))}
                     </div>
-
-                    <div className="wish-counter">
-                      {puzzle.length} / 3 heart pieces
-                    </div>
-
-                    {puzzle.length === 3 && (
-                      <div className="wish-clue">{clues[3]}</div>
-                    )}
-
+                    <div className="wish-counter">{puzzle.length} / 3 heart pieces</div>
+                    {puzzle.length === 3 && <div className="wish-clue">{clues[3]}</div>}
                     {countdown !== null ? (
                       <motion.div
                         key={countdown}
@@ -572,9 +643,7 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="wish-footer">
-                  Made with love, just for you ♡
-                </div>
+                <div className="wish-footer">Made with love, just for you ♡</div>
               </motion.section>
             ) : (
               <motion.section
@@ -596,27 +665,20 @@ export default function App() {
                     </span>
                   ))}
                 </div>
-
                 <div className="wish-eyebrow">THE BIG SURPRISE ✨</div>
                 <div className="wish-celebration">🎉 💖 🎊 💖 🎉</div>
-
                 {photo ? (
                   <img className="wish-photo" src={photo} alt="Surprise" />
                 ) : (
                   <div className="wish-photo-placeholder">💖</div>
                 )}
-
                 <h1>{title}</h1>
                 <p className="wish-final-message">{message}</p>
-
                 <button className="wish-primary" onClick={reset}>
                   <RotateCcw size={18} /> Replay Surprise
                 </button>
-
                 {recipientMode && (
-                  <a href="/" className="wish-primary">
-                    Make Your Own Surprise 💗
-                  </a>
+                  <a href="/" className="wish-primary">Make Your Own Surprise 💗</a>
                 )}
               </motion.section>
             )}
@@ -631,14 +693,20 @@ export default function App() {
               <input
                 value={name}
                 maxLength={80}
-                onChange={(event) => setName(event.target.value)}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  setShareLink("");
+                }}
                 placeholder="Enter their name"
               />
 
               <label>Occasion</label>
               <select
                 value={occasion}
-                onChange={(event) => setOccasion(event.target.value)}
+                onChange={(event) => {
+                  setOccasion(event.target.value);
+                  setShareLink("");
+                }}
               >
                 {Object.entries(occasions).map(([id, label]) => (
                   <option key={id} value={id}>{label}</option>
@@ -646,7 +714,6 @@ export default function App() {
               </select>
 
               <h3>💌 Adventure Clues</h3>
-
               {clues.map((clue, index) => (
                 <div className="wish-clue-editor" key={index}>
                   <label>Stage {index + 1}: {stages[index]}</label>
@@ -660,17 +727,11 @@ export default function App() {
               ))}
 
               <h3>💖 Choose a Final Message</h3>
-
               <label>Message Category</label>
-              <select
-                value={category}
-                onChange={(event) => setCategory(event.target.value)}
-              >
+              <select value={category} onChange={(event) => setCategory(event.target.value)}>
                 <option value="all">All Messages ({loveMessages.length})</option>
                 {messageCategories.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
+                  <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
               </select>
 
@@ -691,7 +752,10 @@ export default function App() {
                     <button
                       key={item.id}
                       className={message === item.text ? "active" : ""}
-                      onClick={() => setMessage(item.text)}
+                      onClick={() => {
+                        setMessage(item.text);
+                        setShareLink("");
+                      }}
                     >
                       {item.text}
                     </button>
@@ -704,7 +768,10 @@ export default function App() {
                 rows={5}
                 maxLength={2000}
                 value={message}
-                onChange={(event) => setMessage(event.target.value)}
+                onChange={(event) => {
+                  setMessage(event.target.value);
+                  setShareLink("");
+                }}
               />
 
               <label className="wish-upload">
@@ -716,8 +783,19 @@ export default function App() {
                 />
               </label>
 
-              <h3>🔐 Security Verification</h3>
+              <div className="music-studio">
+                <h3>🎵 Original Instrumental Music</h3>
+                <p>
+                  Original melodies are generated by your browser.
+                  No YouTube player, music files, or downloads are required.
+                </p>
+                <p><strong>Selected:</strong> {occasions[occasion]}</p>
+                <button type="button" className="wish-primary" onClick={toggleMusic}>
+                  {musicEnabled ? "Pause Music" : "Preview Music"}
+                </button>
+              </div>
 
+              <h3>🔐 Security Verification</h3>
               {TURNSTILE_KEY ? (
                 <Turnstile
                   key={captchaVersion}
@@ -728,12 +806,10 @@ export default function App() {
                   onError={() => setCaptchaToken("")}
                 />
               ) : (
-                <p>Missing VITE_TURNSTILE_SITE_KEY in .env.local</p>
+                <p>Missing VITE_TURNSTILE_SITE_KEY in your environment.</p>
               )}
 
-              {captchaToken && (
-                <p className="wish-verified">✓ Verification successful</p>
-              )}
+              {captchaToken && <p className="wish-verified">✓ Verification successful</p>}
 
               {createError && (
                 <p role="alert" style={{ color: "#b42350", fontWeight: 700 }}>
@@ -753,21 +829,17 @@ export default function App() {
               {shareLink && (
                 <div className="wish-clue">
                   <strong>🎉 Your surprise is ready!</strong>
-                  <p>Send this private link to your recipient:</p>
-
+                  <p>Send this link to your recipient:</p>
                   <input
                     value={shareLink}
                     readOnly
                     onFocus={(event) => event.target.select()}
                     aria-label="Shareable surprise link"
                   />
-
                   <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                     <button className="wish-primary" onClick={copyLink}>
-                      <Copy size={16} />
-                      {copySuccess ? "Copied!" : "Copy Link"}
+                      <Copy size={16} /> {copySuccess ? "Copied!" : "Copy Link"}
                     </button>
-
                     <button className="wish-primary" onClick={shareSurprise}>
                       <Share2 size={16} /> Share
                     </button>
