@@ -831,7 +831,7 @@ export default function App() {
               )}
               <button
                 className="wish-primary"
-                disabled={creating || musicBusy || !captchaToken}
+                disabled={creating || !captchaToken}
                 onClick={createSurprise}
               >
                 <Share2 size={18} />
